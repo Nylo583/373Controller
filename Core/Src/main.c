@@ -99,6 +99,9 @@ static void MX_I2C1_Init(void);
 
 // - begin bmi
 
+#define SPI1_GPIOX GPIOA
+#define SPI1_CS GPIO_PIN_4
+
 void BMI323_Read(uint8_t register_address, uint8_t size) {
 	  spi1_tx_buffer[0] = 0x80 | register_address;
 	  spi1_tx_buffer[1] = 0;
@@ -107,9 +110,9 @@ void BMI323_Read(uint8_t register_address, uint8_t size) {
 		  spi1_tx_buffer[2+i]=0;
 
 
-	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
+	  HAL_GPIO_WritePin(SPI1_GPIOX, SPI1_CS, GPIO_PIN_RESET);
 	  HAL_SPI_TransmitReceive(&hspi1, spi1_tx_buffer, spi1_rx_buffer, 2+2*size, 1000);
-	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
+	  HAL_GPIO_WritePin(SPI1_GPIOX, SPI1_CS, GPIO_PIN_SET);
 }
 
 void BMI323_Write(uint8_t register_address, uint8_t size, uint8_t *data) {
@@ -121,9 +124,9 @@ void BMI323_Write(uint8_t register_address, uint8_t size, uint8_t *data) {
 			spi1_tx_buffer[2*i+2]=data[2*i+1];
 	    }
 
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(SPI1_GPIOX, SPI1_CS, GPIO_PIN_RESET);
 	HAL_SPI_Transmit(&hspi1, spi1_tx_buffer, 1+2*size, 1000);
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(SPI1_GPIOX, SPI1_CS, GPIO_PIN_SET);
 	HAL_Delay(1);
 }
 
@@ -133,10 +136,10 @@ int16_t BMI323_Assemble(uint8_t start) {
 
 
 void BMI323_Init() {
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(SPI1_GPIOX, SPI1_CS, GPIO_PIN_RESET);
 	HAL_Delay(1);
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
-	HAL_Delay(1);
+	HAL_GPIO_WritePin(SPI1_GPIOX, SPI1_CS, GPIO_PIN_SET);
+	HAL_Delay(1); // toggling cs on init switches BMI to SPI mode
 
 
 	uint8_t reset[2]={0xB6,0x00};
@@ -254,72 +257,71 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 // - begin display
 
-static void lcd_write_pcf(uint8_t data)
+static void LCD_write_pcf(uint8_t data)
 {
     HAL_I2C_Master_Transmit(&hi2c1, LCD_ADDR, &data, 1, HAL_MAX_DELAY);
 }
 
-static void lcd_pulse_en(uint8_t data)
+static void LCD_pulse_en(uint8_t data)
 {
-    lcd_write_pcf(data | LCD_EN);
+    LCD_write_pcf(data | LCD_EN);
     HAL_Delay(1);
-    lcd_write_pcf(data & ~LCD_EN);
+    LCD_write_pcf(data & ~LCD_EN);
     HAL_Delay(1);
 }
 
-/* sends the upper nibble of 'data', with RS set accordingly */
-static void lcd_write_nibble(uint8_t data, uint8_t rs)
+static void LCD_write_nibble(uint8_t data, uint8_t rs)
 {
     uint8_t nibble = (data & 0xF0) | LCD_BL | rs;
-    lcd_pulse_en(nibble);
+    LCD_pulse_en(nibble);
 }
 
 /* sends a full byte as two nibbles */
-static void lcd_send(uint8_t data, uint8_t rs)
+static void LCD_send(uint8_t data, uint8_t rs)
 {
-    lcd_write_nibble(data,        rs);  // high nibble
-    lcd_write_nibble(data << 4,   rs);  // low nibble
+    LCD_write_nibble(data,        rs);  // high nibble
+    LCD_write_nibble(data << 4,   rs);  // low nibble
 }
 
-#define lcd_cmd(b)   lcd_send((b), 0x00)
-#define lcd_data(b)  lcd_send((b), LCD_RS)
+#define LCD_cmd(b)   LCD_send((b), 0x00)
+#define LCD_data(b)  LCD_send((b), LCD_RS)
 
 /* ── init ─────────────────────────────────────────────────── */
 
-void lcd_init(void)
+void LCD_init(void)
 {
     HAL_Delay(50);                      // wait for LCD power-on
 
-    // reset sequence — send 0x3 nibble three times to ensure 8-bit mode
-    lcd_write_nibble(0x30, 0);  HAL_Delay(5);
-    lcd_write_nibble(0x30, 0);  HAL_Delay(1);
-    lcd_write_nibble(0x30, 0);  HAL_Delay(1);
+    // reset sequence:send 0x3 nibble three times to ensure 8-bit mode
+    LCD_write_nibble(0x30, 0);  HAL_Delay(5);
+    LCD_write_nibble(0x30, 0);  HAL_Delay(1);
+    LCD_write_nibble(0x30, 0);  HAL_Delay(1);
 
     // switch to 4-bit mode
-    lcd_write_nibble(0x20, 0);  HAL_Delay(1);
+    LCD_write_nibble(0x20, 0);  HAL_Delay(1);
 
     // from here, full bytes as two nibbles
-    lcd_cmd(0x28);   // function set:  4-bit | 2 lines | 5x8
-    lcd_cmd(0x0C);   // display on, cursor off, blink off
-    lcd_cmd(0x06);   // entry mode: increment, no shift
-    lcd_cmd(0x01);   // clear display
+    LCD_cmd(0x28);   // function set:  4-bit | 2 lines | 5x8
+    LCD_cmd(0x0C);   // display on, cursor off, blink off
+    LCD_cmd(0x06);   // entry mode: increment, no shift
+    LCD_cmd(0x01);   // clear display
     HAL_Delay(2);    // clear needs >1.5ms
 }
 
-void lcd_set_cursor(uint8_t col, uint8_t row)
+void LCD_set_cursor(uint8_t col, uint8_t row)
 {
     uint8_t row_offsets[] = {0x00, 0x40, 0x14, 0x54};  // was missing rows 2 and 3
-    lcd_cmd(0x80 | (col + row_offsets[row]));
+    LCD_cmd(0x80 | (col + row_offsets[row]));
 }
 
-void lcd_print(const char *str)
+void LCD_print(const char *str)
 {
     while (*str)
-        lcd_data((uint8_t)*str++);
+        LCD_data((uint8_t)*str++);
 }
 
 void LCD_Clear() {
-	lcd_cmd(0x01);   // clear display
+	LCD_cmd(0x01);   // clear display
 	HAL_Delay(2);    // clear needs >1.5ms
 }
 
@@ -383,9 +385,9 @@ int main(void)
 
   HAL_TIM_Base_Start_IT(&htim2);
 
-  lcd_init();
-  lcd_set_cursor(0, 0);
-  lcd_print("Hello!");
+  LCD_init();
+  LCD_set_cursor(0, 0);
+  LCD_print("Hello!");
 
   /* USER CODE END 2 */
 
@@ -406,29 +408,29 @@ int main(void)
 
 	          char buffer[21];
 
-              lcd_set_cursor(0, 0);
+              LCD_set_cursor(0, 0);
               sprintf(buffer, "w: %.4f", q0);
-              lcd_print(buffer);
+              LCD_print(buffer);
 
-              lcd_set_cursor(0, 1);
+              LCD_set_cursor(0, 1);
               sprintf(buffer, "x: %.4f", q1);
-              lcd_print(buffer);
+              LCD_print(buffer);
 
-              lcd_set_cursor(0, 2);
+              LCD_set_cursor(0, 2);
               sprintf(buffer, "y: %.4f", q2);
-              lcd_print(buffer);
+              LCD_print(buffer);
 
-              lcd_set_cursor(0, 3);
+              LCD_set_cursor(0, 3);
               sprintf(buffer, "z: %.4f", q3);
-              lcd_print(buffer);
+              LCD_print(buffer);
 
-              lcd_set_cursor(12, 2);
+              LCD_set_cursor(12, 2);
               sprintf(buffer, "count:");
-              lcd_print(buffer);
+              LCD_print(buffer);
 
-              lcd_set_cursor(12, 3);
+              LCD_set_cursor(12, 3);
               sprintf(buffer, "%d", RE_count);
-              lcd_print(buffer);
+              LCD_print(buffer);
 
 	  }
 
